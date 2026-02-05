@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path="backend/.env")
 
-BASE_URL = "http://127.0.0.1:8000"
+# BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "https://honeypot-scam-detection-theta.vercel.app" # Vercel Deployment
 API_KEY = os.getenv("API_KEY")
 
 def run_step(step_num, title, message, session_id, headers):
