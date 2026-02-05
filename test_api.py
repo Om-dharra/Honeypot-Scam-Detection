@@ -59,6 +59,29 @@ def test_chat():
     except Exception as e:
         print(f"Error in Step 5: {e}")
 
+    # 6. Hackathon Complex Spec Test
+    print("\n[Step 6] Hackathon Complex Spec Test (Nested Message Object)...")
+    payload_complex = {
+        "sessionId": session_id,
+        "message": {
+            "sender": "scammer",
+            "text": "Your bank account will be blocked today. Verify immediately.",
+            "timestamp": 1770005528731
+        },
+        "conversationHistory": [],
+        "metadata": {
+            "channel": "SMS",
+            "language": "English",
+            "locale": "IN"
+        }
+    }
+    try:
+        resp = requests.post(f"{BASE_URL}/chat", headers=headers, json=payload_complex)
+        resp.raise_for_status()
+        print(f"Response: {resp.json()}")
+    except Exception as e:
+        print(f"Error in Step 6: {e}")
+
     print("\n--- Test Complete. Check server logs for [ALERT] and [INTEL] messages. ---")
 
 if __name__ == "__main__":

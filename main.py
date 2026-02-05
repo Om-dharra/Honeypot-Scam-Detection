@@ -2,7 +2,7 @@ import os
 import json
 import re
 import requests
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -35,16 +35,30 @@ except Exception as e:
     print(f"Warning: Redis connection failed: {e}")
     r = None
 
+class MessageObject(BaseModel):
+    sender: Optional[str] = "scammer"
+    text: str
+    timestamp: Optional[int] = None
+
+class MetadataObject(BaseModel):
+    channel: Optional[str] = None
+    language: Optional[str] = None
+    locale: Optional[str] = None
+
 class ChatRequest(BaseModel):
     sessionId: Optional[str] = None
-    session_id: Optional[str] = None  # Compatibility alias
-    message: Optional[str] = None
-    text: Optional[str] = None        # Compatibility alias
-    query: Optional[str] = None       # Compatibility alias
-    input: Optional[str] = None       # Compatibility alias
-    content: Optional[str] = None     # Compatibility alias
-    conversationHistory: Optional[List[dict]] = []
-    history: Optional[List[dict]] = [] # Compatibility alias
+    # Flexible: Accept string OR object (standard spec)
+    message: Union[MessageObject, str] 
+    conversationHistory: List[dict] = []
+    metadata: Optional[MetadataObject] = None
+    
+    # Aliases for compatibility
+    session_id: Optional[str] = None 
+    text: Optional[str] = None       
+    query: Optional[str] = None       
+    input: Optional[str] = None       
+    content: Optional[str] = None     
+    history: Optional[List[dict]] = []
 
 class ChatResponse(BaseModel):
     status: str
@@ -253,13 +267,24 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks,
     # Normalize Input (Handle aliases)
     # Normalize Input (Handle aliases)
     session_id = request.sessionId or request.session_id or "default-session"
+    
+    # Extract Message Text
+    raw_message = request.message
+    user_message_text = ""
+
+    if isinstance(raw_message, str):
+        user_message_text = raw_message
+    elif hasattr(raw_message, "text"):
+        user_message_text = raw_message.text
+    
+    # Fallback to aliases
     user_message = (
-        request.message or 
+        user_message_text or 
         request.text or 
         request.query or 
         request.input or 
         request.content or 
-        "Hello" # Fallback to prevent 422
+        "Hello" # Fallback
     )
     
     session = get_session(session_id)
