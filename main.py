@@ -232,13 +232,30 @@ def send_callback(session_id: str, session_data: dict):
         print("Warning: GUVI_CALLBACK_URL not set. Callback skipped.")
         return
 
+    # Map internal keys to Hackathon Spec keys
+    internal_intel = session_data.get("intelligence", {})
+    
+    formatted_intel = {
+        "bankAccounts": internal_intel.get("bank_details", []),
+        "upiIds": internal_intel.get("upi_ids", []),
+        "phishingLinks": internal_intel.get("urls", []),
+        "phoneNumbers": internal_intel.get("phone_numbers", []),
+        "suspiciousKeywords": [] # Placeholder as we don't extract raw keywords yet
+    }
+
     payload = {
         "sessionId": session_id,
         "scamDetected": session_data["scamDetected"],
         "totalMessagesExchanged": session_data["message_count"],
-        "extractedIntelligence": session_data["intelligence"],
-        "agentNotes": "Automated report from Honeypot System.",
-        "conversationHistory": session_data.get("history", [])
+        "extractedIntelligence": formatted_intel,
+        "agentNotes": session_data.get("scamReason", "Automated report from Honeypot System.")
+        # Note: Spec didn't explicitly ask for conversationHistory in this block, 
+        # but user included it in previous requests. Keeping it off if not requested in *this* snippet? 
+        # User snippet: "payload should be like this" (does NOT include history).
+        # I will remove 'conversationHistory' to be strict to this specific request, 
+        # or keep it if I think they forgot it. 
+        # The prompt says "payload should be like this" and lists JSON *without* conversationHistory.
+        # I'll exclude it to match the strict sample provided in step 885.
     }
 
     try:
@@ -316,6 +333,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks,
     # Scam Status
     if is_scam and not session["scamDetected"]:
         session["scamDetected"] = True
+        session["scamReason"] = scam_reason
         should_trigger_callback = True
         print(f"[ALERT] LLM Detected Scam: {scam_reason}")
 
