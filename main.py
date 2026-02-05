@@ -10,12 +10,10 @@ import google.generativeai as genai
 from groq import Groq
 import redis
 
-# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="Honeypot Scam Detector")
 
-# --- Configuration ---
 API_KEY = os.getenv("API_KEY", "secret-api-key-123")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
@@ -23,7 +21,6 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 MAX_HISTORY_CONTEXT = 15 # Sliding window size
 GUVI_CALLBACK_URL = os.getenv("GUVI_CALLBACK_URL")
 
-# --- Redis Client ---
 try:
     r = redis.Redis(
         host=REDIS_HOST, 
@@ -38,24 +35,25 @@ except Exception as e:
     print(f"Warning: Redis connection failed: {e}")
     r = None
 
-# --- Data Models ---
 class ChatRequest(BaseModel):
-    sessionId: str
-    message: str
+    sessionId: Optional[str] = None
+    session_id: Optional[str] = None  # Compatibility alias
+    message: Optional[str] = None
+    text: Optional[str] = None        # Compatibility alias
     conversationHistory: Optional[List[dict]] = []
+    history: Optional[List[dict]] = [] # Compatibility alias
 
 class ChatResponse(BaseModel):
     status: str
     reply: str
 
-# --- Storage Helper ---
 def get_session(session_id: str) -> dict:
     if r:
         data = r.get(f"session:{session_id}")
         if data:
             return json.loads(data)
     
-    # Default structure
+   
     return {
         "scamDetected": False,
         "intelligence": {
@@ -64,14 +62,13 @@ def get_session(session_id: str) -> dict:
             "phone_numbers": []
         },
         "message_count": 0,
-        "history": [] # Stores full conversation
+        "history": [] 
     }
 
 def save_session(session_id: str, data: dict):
     if r:
         r.set(f"session:{session_id}", json.dumps(data))
 
-# --- Logic Helper Functions ---
 
 def extract_intelligence_regex(message: str) -> dict:
     """
@@ -84,7 +81,7 @@ def extract_intelligence_regex(message: str) -> dict:
         "bank_details": [] 
     }
     
-    # regex patterns
+     # regex patterns
     upi_pattern = r"[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}"
     url_pattern = r"https?://[^\s]+"
     phone_pattern = r"(\+91[\-\s]?)?[6-9]\d{9}"
@@ -105,7 +102,6 @@ def extract_intelligence_regex(message: str) -> dict:
     
     return extracted
 
-# --- LLM Helper Functions ---
 SYSTEM_PROMPT = """
 You are acting as a dual-system agent.
 1. ANALYST: Analyze the user's message for scam intent (urgency, threats, financial requests, KYC, etc.). Extract any UPI IDs, URLs, Phone numbers, or BANK DETAILS (Account Numbers, IFSC Codes).
@@ -130,13 +126,8 @@ You must respond in VALID JSON format ONLY. Do not add markdown blocks.
 """
 
 def process_turn(session_id: str, user_message: str, history: List[dict], regex_intel: dict) -> dict:
-    """
-    Calls LLM to analyze the message and generate a response.
-    Returns the parsed JSON dict.
-    """
     provider = os.getenv("LLM_PROVIDER", "groq").lower()
     
-    # Construct Context
     context_message = f"""
     User Message: "{user_message}"
     Regex Hints: {json.dumps(regex_intel)}
@@ -152,12 +143,11 @@ def process_turn(session_id: str, user_message: str, history: List[dict], regex_
             client = Groq(api_key=api_key)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             
-            # Optimization: Sliding Window
             recent_history = history[-MAX_HISTORY_CONTEXT:]
             
             for msg in recent_history:
                 role = "user" if msg.get("sender") == "scammer" else "assistant"
-                # Filter out system artifacts from history if any
+                
                 content = msg.get("text", "")
                 if content: messages.append({"role": role, "content": content})
             
@@ -179,7 +169,6 @@ def process_turn(session_id: str, user_message: str, history: List[dict], regex_
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel("gemini-1.5-flash", generation_config={"response_mime_type": "application/json"})
             
-            # Optimization: Sliding Window
             recent_history = history[-MAX_HISTORY_CONTEXT:]
             
             chat_history = []
@@ -201,7 +190,7 @@ def process_turn(session_id: str, user_message: str, history: List[dict], regex_
         elif "```" in response_text:
             response_text = response_text.replace("```", "")
             
-        # Parse JSON
+
         return json.loads(response_text.strip())
 
     except Exception as e:
@@ -210,13 +199,13 @@ def process_turn(session_id: str, user_message: str, history: List[dict], regex_
         print(f"LLM Logic Error: {e}")
         # Fallback safe response
         return {
-            "is_scam": True, # Assume worst case on error if context implies
+            "is_scam": True,
             "scam_reason": "LLM Error Fallback",
             "extracted_intelligence": regex_intel,
             "persona_response": "I... I am having trouble with my phone. Can you say that again?"
         }
 
-# --- Callback Logic ---
+
 def send_callback(session_id: str, session_data: dict):
     """
     Sends the session data to the GUVI callback URL.
@@ -255,41 +244,41 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks,
     3. Calls LLM (Analysis + Response).
     4. Updates Session & Triggers Callback.
     """
-    # 1. API Key Validation
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
-    session_id = request.sessionId
-    user_message = request.message
+    # Normalize Input (Handle aliases)
+    session_id = request.sessionId or request.session_id or "default-session"
+    user_message = request.message or request.text
     
-    # Retrieve Session
+    if not user_message:
+        raise HTTPException(status_code=422, detail="Message field is required (use 'message' or 'text')")
+    
     session = get_session(session_id)
     session["message_count"] += 1
     
-    # Append user message to history
     if "history" not in session: session["history"] = []
     session["history"].append({"sender": "scammer", "text": user_message})
 
-    # Prepare logic flags
     should_trigger_callback = False
 
-    # 2. Regex Extraction (Fast Pre-check)
+   
     regex_intel = extract_intelligence_regex(user_message)
 
     # 3. LLM Processing (The Brain)
     # We pass the accumulated history from the request (client-side) OR our redis history.
     # The prompt expects list of dicts.
-    history_context = request.conversationHistory or []
+    history_context = request.conversationHistory or request.history or []
     
     llm_result = process_turn(session_id, user_message, history_context, regex_intel)
     
-    # Parse LLM Result
+  
     is_scam = llm_result.get("is_scam", False)
     scam_reason = llm_result.get("scam_reason", "Unknown")
     extracted_intel = llm_result.get("extracted_intelligence", {})
     ai_reply = llm_result.get("persona_response", "I am confused.")
 
-    # 4. Update Session State
+  
     
     # Scam Status
     if is_scam and not session["scamDetected"]:
@@ -297,12 +286,9 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks,
         should_trigger_callback = True
         print(f"[ALERT] LLM Detected Scam: {scam_reason}")
 
-    # Intelligence Merge (Regex + LLM findings)
-    # We blindly merge LLM intel into session intel
     for category in ["upi_ids", "urls", "phone_numbers", "bank_details"]:
         found_items = extracted_intel.get(category, [])
         for item in found_items:
-            # Initialize category if missing in session
             if category not in session["intelligence"]:
                 session["intelligence"][category] = []
                 
@@ -311,13 +297,10 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks,
                 should_trigger_callback = True
                 print(f"[INTEL] Extracted {category}: {item}")
 
-    # Append system reply to history
     session["history"].append({"sender": "victim", "text": ai_reply})
 
-    # Save Session
     save_session(session_id, session)
 
-    # 5. Callback Trigger Logic
     if should_trigger_callback or (session["message_count"] % 10 == 0):
         background_tasks.add_task(send_callback, session_id, session)
     

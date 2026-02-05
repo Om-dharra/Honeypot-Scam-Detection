@@ -44,6 +44,20 @@ def test_chat():
     # 4. Intel Extraction (Bank Details)
     run_step(4, "Sending Bank Details...", "Or transfer to Account 987654321012, IFSC HDFC0005678 to avoid legal action.", session_id, headers)
 
+    # 5. Compatibility Test (snake_case)
+    print("\n[Step 5] Compatibility Test (session_id/text field)...")
+    payload_compat = {
+        "session_id": session_id,
+        "text": "Just checking if this works.",
+        "history": []
+    }
+    try:
+        resp = requests.post(f"{BASE_URL}/chat", headers=headers, json=payload_compat)
+        resp.raise_for_status()
+        print(f"Response: {resp.json()}")
+    except Exception as e:
+        print(f"Error in Step 5: {e}")
+
     print("\n--- Test Complete. Check server logs for [ALERT] and [INTEL] messages. ---")
 
 if __name__ == "__main__":
