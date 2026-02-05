@@ -1,0 +1,8 @@
+fastapi[standard]
+uvicorn
+requests
+pydantic
+python-dotenv
+groq
+google-generativeai
+redis
